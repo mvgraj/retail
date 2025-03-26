@@ -9,15 +9,15 @@ import time
 pose_model = YOLO("yolo11n-pose.pt")  # Pose estimation model
 
 # Directories
-input_dir = r"C:\code\emb\codew\new_in"
-output_dir = r"C:\code\emb\codew\out_t"
+input_dir = r"C:\code\emb\test_in"
+output_dir = r"C:\code\emb\test_in\out_t_4"
 screenshot_dir = os.path.join(output_dir, "screenshots")
 os.makedirs(output_dir, exist_ok=True)
 os.makedirs(screenshot_dir, exist_ok=True)
 
 # Processing settings
 skip_frames = 1
-hand_stay_time = 2  # seconds before suspicion
+hand_stay_time = 1  # seconds before suspicion
 hand_timers = {}
 
 # COCO Pose Keypoints
@@ -30,14 +30,14 @@ for file_name in os.listdir(input_dir):
     file_path = os.path.join(input_dir, file_name)
     output_path = os.path.join(output_dir, f"processed_{file_name}")
 
-    if not file_name.lower().endswith(('.mp4', '.avi', '.mov')):
+    if not file_name.lower().endswith((".mp4", ".avi", ".mov")):
         continue
 
     cap = cv2.VideoCapture(file_path)
     frame_width = int(cap.get(3))
     frame_height = int(cap.get(4))
     frame_rate = int(cap.get(5))
-    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*'mp4v'), frame_rate, (frame_width, frame_height))
+    out = cv2.VideoWriter(output_path, cv2.VideoWriter_fourcc(*"mp4v"), frame_rate, (frame_width, frame_height))
 
     frame_count = 0
     while cap.isOpened():
@@ -78,17 +78,6 @@ for file_name in os.listdir(input_dir):
                     right_wrist = person_keypoints[RIGHT_WRIST] if person_keypoints[RIGHT_WRIST][0] > 0 else None
                     nose = person_keypoints[NOSE] if person_keypoints[NOSE][0] > 0 else None  # For front/back detection
                     
-                    # Hand Tracking Boxes
-                    if left_wrist is not None:
-                        lw_x, lw_y = int(left_wrist[0]), int(left_wrist[1])
-                        cv2.rectangle(frame, (lw_x - 15, lw_y - 15), (lw_x + 15, lw_y + 15), (0, 255, 0), 2)
-                        cv2.putText(frame, "Left Hand", (lw_x, lw_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-
-                    if right_wrist is not None:
-                        rw_x, rw_y = int(right_wrist[0]), int(right_wrist[1])
-                        cv2.rectangle(frame, (rw_x - 15, rw_y - 15), (rw_x + 15, rw_y + 15), (0, 255, 0), 2)
-                        cv2.putText(frame, "Right Hand", (rw_x, rw_y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
-                    
                     # Checking if the person is facing away
                     is_back_facing = nose is None or nose[1] < y1  # Nose is not visible or positioned high
 
@@ -96,13 +85,17 @@ for file_name in os.listdir(input_dir):
                     for wrist, label in [(left_wrist, "left"), (right_wrist, "right")]:
                         if wrist is None:
                             continue
-                        
+
                         wrist_x, wrist_y = int(wrist[0]), int(wrist[1])
-                        
-                        # Check if hand is inside any bounding box
-                        in_chest = chest_box[0] <= wrist_x <= chest_box[2] and chest_box[1] <= wrist_y <= chest_box[3]
-                        in_left_waist = left_waist_box[0] <= wrist_x <= left_waist_box[2] and left_waist_box[1] <= wrist_y <= left_waist_box[3]
-                        in_right_waist = right_waist_box[0] <= wrist_x <= right_waist_box[2] and right_waist_box[1] <= wrist_y <= right_waist_box[3]
+                        wrist_box = [wrist_x - 10, wrist_y - 10, wrist_x + 10, wrist_y + 10]  # Small box around wrist
+
+                        # Check if any part of the wrist box intersects the zones
+                        def is_intersecting(box1, box2):
+                            return not (box1[2] < box2[0] or box1[0] > box2[2] or box1[3] < box2[1] or box1[1] > box2[3])
+
+                        in_chest = is_intersecting(wrist_box, chest_box)
+                        in_left_waist = is_intersecting(wrist_box, left_waist_box)
+                        in_right_waist = is_intersecting(wrist_box, right_waist_box)
 
                         if in_chest or in_left_waist or in_right_waist:
                             if label not in hand_timers:
@@ -115,21 +108,12 @@ for file_name in os.listdir(input_dir):
                             if label in hand_timers:
                                 del hand_timers[label]
                     
-                    # If the person is back-facing and hands are missing for too long
-                    if is_back_facing and (left_wrist is None or right_wrist is None):
-                        if "back_facing" not in hand_timers:
-                            hand_timers["back_facing"] = time.time()
-                        elif time.time() - hand_timers["back_facing"] > hand_stay_time:
-                            suspicious_detected = True
-                            cv2.putText(frame, "⚠️ Suspicious (Back-Facing)", (x1, y1 - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-                    else:
-                        if "back_facing" in hand_timers:
-                            del hand_timers["back_facing"]
-                    
-            if suspicious_detected:
-                screenshot_filename = os.path.join(screenshot_dir, f"suspicious_{file_name}_{frame_count}.jpg")
-                cv2.imwrite(screenshot_filename, frame)
-
+                    # Crop and save suspicious region
+                    if suspicious_detected:
+                        suspect_crop = frame[y1:y2, x1:x2]
+                        crop_filename = os.path.join(screenshot_dir, f"crop_{file_name}_{frame_count}.jpg")
+                        cv2.imwrite(crop_filename, suspect_crop)
+                        
             out.write(frame)
             cv2.imshow("Hand-to-Clothing Tracking", frame)
             if cv2.waitKey(1) & 0xFF == ord('q'):
