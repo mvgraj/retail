@@ -13,12 +13,13 @@ video_path = r"C:\code\emb\codew\new_in\Shoplifting (1).mp4"
 cap = cv2.VideoCapture(video_path)
 
 # Create directory to save extracted faces and embeddings
-save_path = r"C:\code\emb\codew\new_in\extracted_faces1234"
+save_path = r"C:\code\emb\codew\new_in\extracted_faces121"
 os.makedirs(save_path, exist_ok=True)
 
 frame_count = 0  # Track frame number
 face_id_counter = 0  # Unique face ID counter
 face_embeddings = {}  # Dictionary to store face IDs and their embeddings
+face_sub_ids = {}  # Dictionary to track sub-IDs for each face ID
 
 def expand_bounding_box(x1, y1, x2, y2, frame_shape, padding=0.2):
     """
@@ -72,30 +73,38 @@ while cap.isOpened():
                 match_found = False
                 current_face_id = None
                 best_similarity = -1  # To track the highest similarity score
-                for face_id, stored_embedding in face_embeddings.items():
-                    similarity = cosine_similarity([embedding], [stored_embedding])[0][0]
-                    if similarity > 0.6:  # Stricter threshold for cosine similarity
+                for face_id, stored_embeddings in face_embeddings.items():
+                    similarities = [cosine_similarity([embedding], [stored_embedding])[0][0] for stored_embedding in stored_embeddings]
+                    max_similarity = max(similarities)
+                    if max_similarity > 0.6:  # Stricter threshold for cosine similarity
                         match_found = True
                         current_face_id = face_id
-                        best_similarity = similarity
+                        best_similarity = max_similarity
                         break
 
                 if not match_found:
                     # Assign a new face ID
                     current_face_id = face_id_counter
                     face_id_counter += 1  # Increment the counter for the next face
-                    face_embeddings[current_face_id] = embedding  # Store the new embedding
+                    face_embeddings[current_face_id] = []  # Initialize list for this face
+                    face_sub_ids[current_face_id] = 0  # Initialize sub-ID counter for this face
                     print(f"New face detected with ID {current_face_id}")
-
-                    # Save the cropped face and embedding
-                    face_filename = os.path.join(save_path, f"face_{current_face_id}.jpg")
-                    embedding_filename = os.path.join(save_path, f"embedding_{current_face_id}.npy")
-
-                    cv2.imwrite(face_filename, face_crop)  # Save the face image
-                    np.save(embedding_filename, embedding)  # Save the embedding
                 else:
                     print(f"Match found with face ID {current_face_id}, similarity: {best_similarity:.2f}")
-                    continue  # Skip saving if the face is already detected
+
+                # Increment the sub-ID for this face
+                face_sub_ids[current_face_id] += 1
+                sub_id = face_sub_ids[current_face_id]
+
+                # Add the new embedding to the list of embeddings for this face
+                face_embeddings[current_face_id].append(embedding)
+
+                # Save the cropped face and embedding with sub-ID
+                face_filename = os.path.join(save_path, f"face_{current_face_id}_{sub_id}.jpg")
+                embedding_filename = os.path.join(save_path, f"embedding_{current_face_id}_{sub_id}.npy")
+
+                cv2.imwrite(face_filename, face_crop)  # Save the face image
+                np.save(embedding_filename, embedding)  # Save the embedding
 
                 # Draw bounding box and label with face ID
                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
